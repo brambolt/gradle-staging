@@ -1,0 +1,123 @@
+/*
+ * Copyright 2017-2020 Brambolt ehf.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+plugins {
+  id 'java-library'
+  id 'groovy'
+  id 'maven-publish'
+  id 'com.jfrog.artifactory'
+  id 'com.brambolt.gradle.staging' apply false
+}
+
+description = 'A simple sample for the Brambolt staging plugin.'
+group = 'com.brambolt.gradle.samples'
+version = 'SNAPSHOT'
+
+ext {
+  artifactId = 'brambolt-gradle-staging-sample-with-defaults'
+  developers = [[
+    email: 'stefan.sigurdsson@brambolt.com',
+    id: 'stefan.sigurdsson@brambolt.com',
+    name: 'Stefán Sigurðsson'
+  ]]
+  inceptionYear = '2017'
+  isGitHosted = true
+  isOpenSource = false // Disabled publishing the sample to plugins.gradle.org or Bintray
+  licenses = [[
+    id: 'Apache-2.0',
+    name: 'The Apache Software License, Version 2.0',
+    url: 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+  ]]
+  release = bramboltRelease
+  vcsUrl = 'https://github.com/brambolt/gradle-staging'
+}
+
+apply plugin: 'com.brambolt.gradle.staging'
+
+generateProperties {
+  prepend = false
+}
+
+velocity {
+  context(
+    dog1: 'Noah',
+    dog2: 'Phoebe')
+  strict = true
+}
+
+staging {
+  targets(
+    t1: [name: 't1'],
+    t2: [name: 't2'])
+}
+
+apply plugin: 'com.jfrog.artifactory'
+
+artifactory {
+  contextUrl = project.artifactoryContextUrl
+  publish {
+    repository {
+      repoKey = project.artifactoryRepoKey
+      username = project.artifactoryUser
+      password = project.artifactoryToken
+      maven = true
+    }
+    defaults {
+      publications('mavenCustom')
+      publishArtifacts = true
+      publishPom = true
+    }
+  }
+  resolve {
+    repository {
+      repoKey = project.artifactoryRepoKey
+      username = project.artifactoryUser
+      password = project.artifactoryToken
+      maven = true
+    }
+  }
+}
+
+task local(dependsOn: publishToMavenLocal)
+
+task all(dependsOn: artifactoryPublish)
+
+import java.nio.file.FileSystem
+
+import static com.brambolt.nio.file.Files.readString
+import static com.brambolt.nio.file.ZipFileSystems.unzip
+import static java.nio.charset.StandardCharsets.UTF_8
+
+task checkLibs {
+  doLast {
+    checkLib(project, "${project.artifactId}-${project.version}-t1.zip", 'lorem ipsum Noah')
+    checkLib(project, "${project.artifactId}-${project.version}-t2.zip", 'And you, Phoebe')
+  }
+}
+
+static void checkLib(Project project, String baseName, String mask) {
+  File zip = new File("${project.buildDir}/libs/${baseName}")
+  if (!zip.exists())
+    throw new GradleException("Not found: ${zip.absolutePath}")
+  FileSystem fs = unzip(zip)
+  String props = readString(fs.getPath('text-template.txt'), UTF_8)
+  if (!props.contains(mask))
+    throw new GradleException("Unexpected content: ${zip.absolutePath}!text-template.txt\n${props}")
+}
+
+all.finalizedBy(checkLibs)
+
+

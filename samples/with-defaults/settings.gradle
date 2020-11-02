@@ -1,0 +1,15 @@
+
+pluginManagement {
+  repositories {
+    mavenLocal()
+    gradlePluginPortal()
+    mavenCentral()
+  }
+  plugins {
+    id 'com.brambolt.gradle.staging' version bramboltVersion
+    id 'com.jfrog.artifactory' version artifactoryVersion
+  }
+}
+
+rootProject.name = 'brambolt-gradle-staging-sample-with-defaults'
+
