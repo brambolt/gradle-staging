@@ -162,7 +162,7 @@ class StagingExtension {
   }
 
   void targetsDir(File targetsDir) {
-    if (!templateValues.isPresent() || 1 > templateValues.size())
+    if (!templateValues.isPresent() || 1 > templateValues.get().size())
       templateValues.addAll(TEMPLATE_DEFAULTS)
     Map<String, Object> map = new HashMap<>()
     templateValues.get().each {Template template ->
