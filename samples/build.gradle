@@ -21,6 +21,14 @@ task runWithDefaults(type: Exec) {
   }
 }
 
+task runWithEnvironments(type: Exec) {
+  workingDir = new File(project.projectDir, 'with-environments')
+  commandLine(['../../gradlew', 'all', '--info', '--stacktrace', '--no-daemon',
+               "-PbramboltRelease=UNKNOWN",
+               "-PbramboltVersion=${bramboltVersion}",
+               "-PbuildNumber=SNAPSHOT"])
+}
+
 task runWithTargets(type: Exec) {
   workingDir = new File(project.projectDir, 'with-targets')
   commandLine(['../../gradlew', 'all', '--info', '--stacktrace', '--no-daemon',
@@ -29,8 +37,8 @@ task runWithTargets(type: Exec) {
                "-PbuildNumber=SNAPSHOT"])
 }
 
-task runWithEnvironments(type: Exec) {
-  workingDir = new File(project.projectDir, 'with-environments')
+task runWithTemplateTree(type: Exec) {
+  workingDir = new File(project.projectDir, 'with-template-tree')
   commandLine(['../../gradlew', 'all', '--info', '--stacktrace', '--no-daemon',
                "-PbramboltRelease=UNKNOWN",
                "-PbramboltVersion=${bramboltVersion}",
@@ -40,6 +48,7 @@ task runWithEnvironments(type: Exec) {
 task runAll {
   dependsOn(runSimple)
   dependsOn(runWithDefaults)
-  dependsOn(runWithTargets)
   dependsOn(runWithEnvironments)
+  dependsOn(runWithTargets)
+  dependsOn(runWithTemplateTree)
 }
