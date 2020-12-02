@@ -16,20 +16,57 @@ import org.gradle.language.jvm.tasks.ProcessResources
 import static com.brambolt.gradle.text.Strings.firstToUpperCase
 
 /**
- * This task creates a staging binary.
+ * This task creates target-specific staging binaries.
  *
- * A staging binary is a zip file containing a Gradle wrapper and a build
- * script. The build script is responsible for installing an application or an
- * environment of some sort.
+ * <p>A staging binary is a zip file containing target-specific resources. The
+ * targets normally correspond to application environments like development
+ * or production but targets can also correspond to hosts, or any other logical
+ * unit for which an independent set of resources is required.</p>
+ *
+ * <p>The execution sequence is as follows:</p>
+ * <ul>
+ *   <li>First the generate-properties task populates <code>build/vtl</code>.</li>
+ *   <li>Then velocity tasks create <code>build/templates</code>.</li>
+ *   <li>Independently, process-resources creates <code>build/resources/main</code>.</li>
+ *   <li>Next the copy-resources tasks create <code>build/targets</code>.</li>
+ *   <li>Finally the archive tasks create <code>build/lib/*.zip</code>.</li>
+ * </ul>
+ *
+ * <p>The staging tasks don't support source sets properly. Instead of the
+ * <code>build/targets</code> directory, <code>build/targets/main</code>
+ * should be used, etc.</p>
+ *
+ * <p>The generated archives are zip files, without jar manifests.</p>
  */
 class Stage extends DefaultTask {
 
+  /**
+   * Defines the targets to produce staging binaries for.
+   */
   MapProperty<String, Object> targets
 
-  MapProperty<String, Object> artifactCache
+  private MapProperty<String, Object> artifactCache
 
-  String gradleWrapperPath = '.'
-
+  /**
+   * If this property is set to true then the task will use all available
+   * resources when creating the staging binary for each target; if the property
+   * is set to false then the task only considers resources with base names
+   * that are suffixed by the target name. Defaults to false.
+   *
+   * <p>For example, if there are two targets <code>dev</code> and
+   * <code>test</code> and three resources <code>file1.txt</code>,
+   * <code>file2.txt.dev</code> and <code>file2.txt.test</code> then the
+   * default behavior is to ignore <code>file1.txt</code> and produce two
+   * staging binaries that each contains a file named <code>file2.txt</code>.</p>
+   *
+   * <p>If on the other hand the property is set to true then each binary
+   * will contain all three resources and the target name suffixes will not be
+   * removed from the file names.</p>
+   *
+   * <p>The sensible uses are to either set the property to false and include
+   * target suffixes on all file names, or set the property to true and remove
+   * all target suffixes from the file names.</p>
+   */
   Boolean includeAllResources = false
 
   Stage() {
@@ -38,8 +75,26 @@ class Stage extends DefaultTask {
     artifactCache.set(new HashMap<String, Object>())
   }
 
+  /**
+   * Provides the artifact identifier for the generated archives. This is
+   * either <code>project.ext.artifactId</code> or (by default) the project
+   * name.
+   *
+   * <p>Every staging binary shares the same artifact identifier. The
+   * staging binaries are distinguished by the artifact classifier, which is
+   * always set to the target name for the respective artifact.</p>
+   *
+   * @param project The project the task belongs to
+   * @return The artifact identifier to use for the staging binaries
+   */
+  static String getArtifactId(Project project) {
+    (project.hasProperty('artifactId')
+      ? project.artifactId
+      : project.name)
+  }
+
   static File getResourcesDir(Project project, Map target) {
-    new File("${project.buildDir}/resources/${target.name}")
+    new File("${project.buildDir}/targets/${target.name}")
   }
 
   static File getTemplatesDir(Project project, Map target) {
@@ -53,8 +108,22 @@ Targets: [${targets.getOrElse(null)}]""")
      // Force execution, until input/output is handled correctly:
     outputs.upToDateWhen { false }
     super.configure(closure)
+    setResourcesDirs()
     configureTargets()
     this
+  }
+
+  void setResourcesDirs() {
+    if (!includeAllResources)
+      project.sourceSets {
+        main {
+          resources {
+            srcDirs(
+              "${project.projectDir}/src/main/resources",
+            )
+          }
+        }
+      }
   }
 
   void configureTargets() {
@@ -62,20 +131,16 @@ Targets: [${targets.getOrElse(null)}]""")
   }
 
   void configureTarget(Map target) {
-    project.logger.info("""Configuring staging target ${target.name}:
-${target}""")
     checkTarget(target)
     ProcessResources processResources = (ProcessResources) project.tasks.findByName('processResources')
+    // Create a target-specific velocity task if the target contains a context:
     if (target.containsKey('context')) {
       Velocity targetVelocity = createTargetVelocityTask(target, project.velocity as Task)
       processResources.dependsOn(targetVelocity)
     }
     String resourcesSuffix = target.containsKey('context') ? "/${target.name}" : ''
     Copy resources = createResourcesTask(target, processResources,
-      "${project.buildDir}/resources/main${resourcesSuffix}")
-    // Copy gradleWrapper = createGradleWrapperTask(target, resources)
-    // Copy gradleProperties = createGradlePropertiesTask(target, gradleWrapper)
-    // Task settings = createSettingsTask(target, gradleProperties)
+      "${project.buildDir}/templates/${resourcesSuffix}")
     Zip zip = createArchiveTask(target, resources)
     PublishArtifact zipArtifact = createZipArtifact(target, zip)
     project.logger.info("Created publishing artifact $zipArtifact")
@@ -89,8 +154,8 @@ ${target}""")
   }
 
   Velocity createTargetVelocityTask(Map target, Task dependency) {
-    Velocity targetVelocity = (Velocity) project
-      .task(type: Velocity, "${target.name}${firstToUpperCase(Velocity.DEFAULT_VELOCITY_TASK_NAME)}")
+    String taskName = "${target.name}${firstToUpperCase(Velocity.DEFAULT_VELOCITY_TASK_NAME)}"
+    Velocity targetVelocity = (Velocity) project.task(type: Velocity, taskName)
     Velocity velocity = (Velocity) project.tasks.findByName(Velocity.DEFAULT_VELOCITY_TASK_NAME)
     if (null != velocity) {
       // Disable the velocity task, since we're doing target velocities instead:
@@ -120,9 +185,11 @@ ${target}""")
     if (null != existing)
       return existing // Yes - already did - nothing more to be done
     // Closure<String> inclusion = { getResourceInclusion(target) }
+    Task processResources = project.tasks.findByName('processResources')
     Closure<Closure<String>> nameFilter = { getNameFilter(target) }
     (Copy) project.task([type: Copy, dependsOn: dependency], taskName) {
       from project.file(inputPath)
+      from processResources.destinationDir
       into getResourcesDir(project, target)
       // include inclusion.call()
       include includeAllResources ? "**/*" : "**/*.${target.name}"
@@ -147,7 +214,7 @@ ${target}""")
     if (null != existing)
       return existing
     (Zip) project.task([type: Zip, dependsOn: previous], taskName) {
-      archiveFileName = "${project.ext.artifactId}-${project.version}-${target.name}.zip"
+      archiveFileName = "${getArtifactId(project)}-${project.version}-${target.name}.zip"
       destinationDirectory = outputDir
       from getResourcesDir(project, target)
       doFirst {
@@ -173,7 +240,7 @@ ${target}""")
       publications {
         mavenCustom(MavenPublication) {
           groupId project.group
-          artifactId project.ext.artifactId
+          artifactId getArtifactId(project)
           version project.version
           artifact(targetArtifact) {
             classifier((String) target.name)

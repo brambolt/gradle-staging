@@ -27,7 +27,6 @@ class StagingPlugin implements Plugin<Project> {
    * @param project The project to apply the plug-in to
    */
   void apply(Project project) {
-    setResourcesDirs(project)
     createPropertiesTask(project)
     createVelocityTask(project)
     configureProcessResourcesTask(project)
@@ -35,19 +34,6 @@ class StagingPlugin implements Plugin<Project> {
     // createHostsContainer(project)
     StagingExtension extension = createStagingExtension(project)
     createStagingTask(project, extension)
-  }
-
-  void setResourcesDirs(Project project) {
-    project.sourceSets {
-      main {
-        resources {
-          srcDirs(
-            "${project.projectDir}/src/main/resources",
-            "${project.buildDir}/templates"
-          )
-        }
-      }
-    }
   }
 
   GenerateProperties createPropertiesTask(Project project) {
